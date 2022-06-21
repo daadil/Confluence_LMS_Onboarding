@@ -1,0 +1,100 @@
+# Assigns Users to Confluence LMS Courses
+# David Adil, April 2022
+# Future implementation follow this asana page
+# https://app.asana.com/0/1202142147521830/board
+
+import datetime, time, config, requests, getpass, glob, pandas as pd
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
+from loguru import logger
+debug_mode = True
+
+logger.add("New_Employee_Onboarding.py_Activity_log_{time:YYYY-MM-DD}.log",
+           format = "{time:YYYY-MM-DD HH:mm:ss} {level:20} {message}", level = "INFO")
+
+courses = ["167610168"] #"195377839", "111102374"
+# 195377839 = "HBO Platform Intro Course" (30 minutes)
+# 111102374 = "HBO MAX (DTC) Technology Group Onboarding" (60 minutes)
+image_path = "https://static.miraheze.org/freshwebsiteswiki/thumb/8/8a/1100px-HBO_Max_Logo.svg.png/660px-1100px-HBO_Max_Logo.svg.png"
+
+columns = ['Email', 'Start_Date', 'Reporting_Manager']
+current_date = datetime.now()
+five_business_days = (datetime.now() + relativedelta(days = 5))
+# end_of_week
+
+if debug_mode == True:
+    target_users = ["david.adil@warnermedia.com"] # "david.adil@warnermedia.com" , "rustyn.clark@warnermedia.com", "joanne.kopetoske@warnermedia.com"
+else:
+    username = getpass.getuser()
+    extension = f"/Users/{username}/Downloads/"
+    excel_file = glob.glob(f'{extension}DTC_CODEX_Test_v9.5.xlsx')[0]
+    f = open(excel_file, 'rb')
+    print(extension)
+    user_df = pd.read_excel(f, sheet_name='CODEX')
+    target_users = user_df[(user_df.Employment_Type != "Employee Intern") &
+                           (user_df.Employment_Status == "Active") &
+                           ((user_df.Contract_Agency != "Globant") |
+                           (user_df.Contract_Agency != "Reaktor") |
+                           (user_df.Contract_Agency != "Intive"))][columns]
+    target_users = target_users.loc[(target_users['Start_Date'] >= str(current_date)) &
+                                      (target_users['Start_Date'] < str(five_business_days))]
+
+# Finds 5 business days from today then sets due date
+# TODO target due date needs to be start date + 5 business days
+targetDate = pd.Timestamp(current_date) + \
+             pd.tseries.offsets.BusinessDay(offset = datetime.timedelta(days=6)) # API reqs +1 day in UTC conversion
+targetDay = targetDate.day
+targetMonth = targetDate.month
+targetYear = targetDate.year
+# sets time to 8 AM on target due date
+target_due_date = datetime.datetime(targetYear, targetMonth, targetDay, 16, 0, 0)
+# multiplies by 1000 to satisfy API requirement for 13 char Epoch Unix formatting
+payload_due_date = int(time.mktime(target_due_date.timetuple())) * 1000
+# Use this website for testing Epoch Unix timestamps https://www.unixtimestamp.com/
+
+# if debug_mode == True:
+#     print(f"{current_date=}")
+#     print(f"{five_business_days=}")
+#     print(f"{targetDate=}")
+#     print(f"{targetDay=}")
+#     print(f"{targetMonth=}")
+#     print(f"{targetYear=}")
+#     print(f"{target_due_date=}")
+#     print(f"{payload_due_date=}")
+#     print(target_users.head())
+#     exit()
+exit()
+
+def assignConfluenceCourse(target_users, courseID):
+    message = "<p>Reminder-</p>" \
+              "<h3>Welcome to DTC Technology!</h3> " \
+              "<p>We're excited you're here and want to present you with a <b>self-paced onboarding course</b>. " \
+              "This course helps ensure you get all the information you need for the best start possible in your new " \
+              "role.</p> <p> Please complete this course by <b>" + \
+              str(((target_due_date - datetime.timedelta(days = 1))).strftime('%B, %d')) + \
+              " PST.</p> <p>If you have questions or concerns, ping #new-hire-help on Slack.</p>" \
+              "<p><img src=\"" + image_path + "\" height=\"25\" width=\"150\"></p>"
+    payload = {
+                "message": message,
+                "groups": [],
+                "users": target_users,
+                "dueDate": payload_due_date
+              }
+    try:
+        updateprofile = requests.post(config.confstgurl + '/rest/lms/1.0/course/' + courseID + '/assign',
+                                      auth=(config.conf_dtc_tech_learning_user, config.conf_dtc_tech_learning_pwd), json=payload)
+        logger.info(f"These Resources, {target_users}, were assigned to course {courseID} with the due date of"
+                    f" {str(target_due_date - datetime.timedelta(days=1))}" + ".")
+    except:
+        print("Something went wrong when interacting with the Confluence  API.")
+        exit()
+
+for courseID in courses:
+    assignConfluenceCourse(target_users, courseID)
+
+exit()
+
+# TODO Ask Joanne and Rustyn the following
+# Does every new hire in the DTC are provisioned a Confluence account?
+# How have the specific title courses been going? Do you have a list of titles Joanne?
+#
